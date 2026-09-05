@@ -1,0 +1,15 @@
+# Java and Maven build output
+target/
+*.class
+*.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
