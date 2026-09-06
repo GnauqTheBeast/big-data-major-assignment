@@ -265,6 +265,217 @@ t=+E      Health check xác nhận bốn dịch vụ Hadoop sẵn sàng
 
 `depends_on` chỉ kiểm soát thứ tự bắt đầu container, không bảo đảm dịch vụ phụ thuộc đã hoàn toàn sẵn sàng. Vì vậy sau khi chạy `docker compose up -d` vẫn cần theo dõi `docker compose ps`, log và Web UI.
 
+### 7.5. Reducer chạy ở đâu?
+
+Reducer không phải là DataNode và số Reducer không tương ứng một-một với số DataNode. Ba khái niệm thuộc các lớp khác nhau:
+
+| Thành phần | Vòng đời | Vai trò |
+|---|---|---|
+| DataNode | Daemon chạy lâu dài | Lưu các HDFS block |
+| NodeManager | Daemon chạy lâu dài | Cung cấp CPU/RAM và quản lý YARN container trên một worker |
+| Reducer | Task tạm thời của một job | Nhận map output, merge/sort, chạy hàm `reduce` và tạo output |
+
+Một worker thường chạy cả DataNode và NodeManager để đưa compute tới gần data:
+
+```text
+Worker machine
+├── DataNode       HDFS storage
+└── NodeManager    YARN compute
+    ├── Mapper container
+    └── Reducer container
+```
+
+Hai daemon có thể cùng nằm trên một máy nhưng vẫn độc lập. Có thể có compute-only node chạy NodeManager mà không chạy DataNode, hoặc storage-only node chạy DataNode mà không nhận YARN task.
+
+#### 7.5.1. Local mode
+
+Khi `mapreduce.framework.name` là `local`, Hadoop dùng LocalJobRunner. Mapper và Reducer chạy trong JVM của client đã gọi `hadoop jar`, không chạy trong NodeManager:
+
+```text
+docker exec namenode hadoop jar ...
+                  │
+                  ▼
+namenode container
+└── client JVM / LocalJobRunner
+    ├── Mapper task
+    └── Reducer task
+```
+
+Container có tên `namenode` lúc này chứa hai process với hai vai trò khác nhau: NameNode daemon và client JVM. Nói "Reducer chạy trong container namenode" không có nghĩa Reducer chạy bên trong NameNode daemon.
+
+Dấu hiệu rõ nhất trong log là job ID có tiền tố:
+
+```text
+job_local...
+```
+
+Local job không xuất hiện trong ResourceManager UI vì ResourceManager và NodeManager không tham gia thực thi job đó.
+
+Repository hiện tại có cấu hình NameNode, ResourceManager và shuffle service nhưng `hadoop.env` chưa khai báo:
+
+```properties
+MAPRED_CONF_mapreduce_framework_name=yarn
+```
+
+Vì vậy cần kiểm tra log thực tế; nếu thấy `job_local...`, job đang dùng LocalJobRunner. Chỉ thêm một biến có thể chưa đủ cho mọi image: MapReduce-on-YARN còn yêu cầu Hadoop configuration và classpath nhất quán trong ResourceManager, NodeManager và client container.
+
+#### 7.5.2. YARN mode
+
+Khi cấu hình sau được áp dụng nhất quán cho cluster:
+
+```xml
+<property>
+    <name>mapreduce.framework.name</name>
+    <value>yarn</value>
+</property>
+```
+
+quá trình thực thi là:
+
+```mermaid
+flowchart LR
+    C[MapReduce client]
+    RM[ResourceManager]
+    AM[ApplicationMaster]
+    NM1[NodeManager 1]
+    NM2[NodeManager 2]
+    R0[Reducer 0]
+    R1[Reducer 1]
+    R2[Reducer 2]
+    R3[Reducer 3]
+    NN[NameNode]
+    DN[DataNodes]
+
+    C -->|submit job| RM
+    RM --> AM
+    AM -->|request containers| RM
+    RM -->|allocate| NM1
+    RM -->|allocate| NM2
+    NM1 --> R0
+    NM1 --> R1
+    NM2 --> R2
+    NM2 --> R3
+    R0 -->|create output metadata| NN
+    R1 -->|create output metadata| NN
+    R2 -->|create output metadata| NN
+    R3 -->|create output metadata| NN
+    R0 -->|write output bytes| DN
+    R1 -->|write output bytes| DN
+    R2 -->|write output bytes| DN
+    R3 -->|write output bytes| DN
+```
+
+ResourceManager không tự chạy Reducer. Nó cấp tài nguyên; ApplicationMaster điều phối job; NodeManager tạo YARN container chứa Mapper hoặc Reducer JVM.
+
+Trong shuffle, Reducer lấy intermediate map output từ local storage của các NodeManager thông qua `mapreduce_shuffle`. Intermediate map output thông thường không phải là final HDFS output. Khi Reducer hoàn tất, HDFS client của task liên hệ NameNode để tạo file và gửi byte output tới các DataNode.
+
+#### 7.5.3. Reducer task, concurrent slot và execution wave
+
+Lệnh:
+
+```java
+job.setNumReduceTasks(10);
+```
+
+tạo mười logical reduce task và thường tạo mười output partition. Nó không tạo mười DataNode, mười NodeManager hoặc mười máy.
+
+Ví dụ cluster có hai NodeManager và mỗi NodeManager đủ tài nguyên chạy đồng thời hai Reducer container:
+
+```text
+Tổng Reducer task: 10
+Concurrent capacity: 2 NodeManager × 2 container = 4 Reducer
+
+Wave 1
+├── NodeManager 1: Reducer 0, Reducer 1
+└── NodeManager 2: Reducer 2, Reducer 3
+
+Wave 2
+├── NodeManager 1: Reducer 4, Reducer 5
+└── NodeManager 2: Reducer 6, Reducer 7
+
+Wave 3
+└── Reducer 8, Reducer 9 chạy khi container trống
+```
+
+Do đó:
+
+```text
+Số Reducer       = số reduce task/partition của job
+NodeManager      = nơi cung cấp compute container
+Số DataNode      = năng lực lưu trữ và I/O của HDFS
+```
+
+Tăng số Reducer có thể chia nhỏ công việc, nhưng chỉ tăng parallelism thực tế nếu NodeManager còn CPU và RAM. Nếu chỉ có một worker, nhiều Reducer sẽ cạnh tranh cùng CPU, RAM và disk, hoặc phải chạy theo nhiều wave.
+
+#### 7.5.4. Quan hệ giữa Reducer và DataNode
+
+Reducer có thể chạy trên một node có DataNode, nhưng không bị gắn cố định với DataNode đó. Final output được ghi qua giao thức HDFS:
+
+```text
+Reducer JVM trên NodeManager
+        │
+        ├── metadata request ──▶ NameNode
+        │                         chọn target DataNode
+        │
+        └── output bytes ──────▶ DataNode target
+```
+
+NameNode có thể chọn DataNode trên cùng worker hoặc một worker khác tùy block placement, replication và trạng thái cluster.
+
+Quy tắc ghi nhớ:
+
+```text
+Muốn có thêm compute capacity
+    → thêm hoặc tăng tài nguyên NodeManager
+
+Muốn có thêm HDFS storage, disk throughput hoặc replica
+    → thêm hoặc tăng tài nguyên DataNode
+
+Muốn chia reduce workload thành nhiều partition
+    → tăng số Reducer và chọn partitioner phù hợp
+```
+
+Trong triển khai phổ biến, khi thêm một worker vật lý người quản trị thường chạy cả DataNode và NodeManager trên worker đó. Vì vậy số lượng hai daemon thường tăng cùng nhau, nhưng đây là lựa chọn topology chứ không phải yêu cầu `N Reducer = N DataNode`.
+
+#### 7.5.5. Cách kiểm tra Reducer đang chạy ở đâu
+
+Kiểm tra execution mode trong job log:
+
+```text
+job_local...          LocalJobRunner
+application_...       YARN application
+```
+
+Kiểm tra các NodeManager đã đăng ký:
+
+```bash
+docker exec resourcemanager yarn node -list -all
+```
+
+Kiểm tra application đang chạy:
+
+```bash
+docker exec resourcemanager yarn application -list
+```
+
+Xem trạng thái và container của một application:
+
+```bash
+docker exec resourcemanager yarn application \
+  -status <application_id>
+```
+
+Lấy log sau khi biết application ID:
+
+```bash
+docker exec resourcemanager yarn logs \
+  -applicationId <application_id>
+```
+
+ResourceManager UI tại <http://localhost:8088> hiển thị application, memory/vcore, ApplicationMaster và lịch sử task. NodeManager UI tại <http://localhost:8042> hiển thị container trên worker hiện tại.
+
+Nếu chạy job với nhiều Reducer nhưng không thấy application tại port `8088`, trước tiên hãy tìm `job_local...` trong log. Đó thường là bằng chứng job đang chạy local thay vì YARN.
+
 ## 8. Kết quả thực nghiệm
 
 Tại thời điểm nghiệm thu:
