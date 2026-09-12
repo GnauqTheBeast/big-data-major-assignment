@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hadoop Lab · DataNodes</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/pages.css">
+  <script type="module" src="/datanodes.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">H</span> hadoop<span class="brand-light">lab</span></a>
+    <div class="workspace-label">YOUR WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a href="/#architecture"><span>◈</span> Cluster overview</a>
+      <a href="/#files"><span>↕</span> Integer sort <small>01</small></a>
+      <a href="/jobs"><span>≡</span> Job activity</a>
+      <a class="active" href="/datanodes" aria-current="page"><span>▦</span> DataNodes</a>
+    </nav>
+    <div class="sidebar-note"><span class="dot"></span> LOCAL ADMIN<p>HDFS storage management</p><small>One persistent volume per node.</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span><a href="/">Workspace</a><span class="slash">/</span><strong>DataNodes</strong></span><a class="text-button" href="/jobs">View operation logs →</a></header>
+    <div class="content">
+      <nav class="page-tabs" aria-label="Page navigation"><a href="/">Files</a><a href="/jobs">Job activity</a><a href="/datanodes" aria-current="page">DataNodes</a></nav>
+      <div class="page-heading"><div><div class="eyebrow">LOCAL CLUSTER ADMIN</div><h1>Room for your data.</h1><p>Add storage nodes, inspect their blocks, and remove them through HDFS decommissioning.</p></div><button id="refresh" class="button secondary">↻ Refresh</button></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="panel">
+        <div class="section-heading"><div><h2>HDFS storage <span id="node-count" class="badge">Loading…</span></h2><p>Three available node slots · live metrics from NameNode</p></div><button id="rebalance" class="button secondary">Rebalance blocks</button></div>
+        <div id="storage-message" class="inline-message" hidden></div>
+        <div id="node-cards" class="node-cards"></div>
+        <div class="storage-explanation">
+          <p><strong>Add:</strong> starts a DataNode with its own volume. New writes can use it; existing blocks move when you rebalance.</p>
+          <p><strong>Remove safely:</strong> asks HDFS to decommission the node, waits for the required replicas to exist elsewhere, then stops the container. Its volume is kept. The primary DataNode stays configured.</p>
+          <p><strong>First setup:</strong> adding a node may briefly restart NameNode to enable decommissioning. Its existing data volume is preserved.</p>
+          <p>All nodes run on this machine. They share its physical disk capacity. Replication remains 1, and sorting still uses LocalJobRunner with one reducer. This page expands the HDFS demo topology; it does not add physical machines or distributed compute.</p>
+        </div>
+      </section>
+      <footer class="page-footer"><span>HADOOP LAB <span class="slash">/</span> DATANODES</span><span>Maintenance logs are kept on the Job activity page.</span></footer>
+    </div>
+  </main>
+</body>
+</html>

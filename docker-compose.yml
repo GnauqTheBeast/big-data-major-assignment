@@ -11,10 +11,12 @@ services:
       - "9000:9000"
     environment:
       - CLUSTER_NAME=test-cluster
+      - HDFS_CONF_dfs_hosts_exclude=/etc/hadoop/dashboard/excluded-datanodes
     env_file:
       - ./hadoop.env
     volumes:
       - hadoop_namenode:/hadoop/dfs/name
+      - ./dashboard/state:/etc/hadoop/dashboard:ro
     networks:
       - bigdata-net
 
@@ -30,6 +32,44 @@ services:
       - ./hadoop.env
     volumes:
       - hadoop_datanode:/hadoop/dfs/data
+    networks:
+      - bigdata-net
+
+  datanode-2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode-2
+    hostname: datanode-2
+    profiles: [extra-datanodes]
+    restart: always
+    depends_on:
+      - namenode
+    ports:
+      - "9865:9864"
+    environment:
+      - HDFS_CONF_dfs_datanode_hostname=datanode-2
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_datanode_2:/hadoop/dfs/data
+    networks:
+      - bigdata-net
+
+  datanode-3:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode-3
+    hostname: datanode-3
+    profiles: [extra-datanodes]
+    restart: always
+    depends_on:
+      - namenode
+    ports:
+      - "9867:9864"
+    environment:
+      - HDFS_CONF_dfs_datanode_hostname=datanode-3
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_datanode_3:/hadoop/dfs/data
     networks:
       - bigdata-net
 
@@ -94,6 +134,8 @@ services:
 volumes:
   hadoop_namenode:
   hadoop_datanode:
+  hadoop_datanode_2:
+  hadoop_datanode_3:
 
 networks:
   bigdata-net:

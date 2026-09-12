@@ -13,3 +13,6 @@ target/
 # Logs and temporary files
 *.log
 *.tmp
+
+# Runtime DataNode management state (keep the initial exclude file available)
+dashboard/state/datanodes.json

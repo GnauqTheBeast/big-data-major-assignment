@@ -2,6 +2,10 @@
 
 This MapReduce job sorts one signed 32-bit integer per input line. It preserves duplicates, skips invalid records, and reports invalid input through Hadoop counters.
 
+## Browser UI
+
+Run `npm start` from the repository root and open **http://localhost:3000**. The dashboard can start the cluster, upload or browse HDFS files, run this job, display logs, and download results. It also shows container status and the DataNodes holding the selected file's blocks. No manual JAR build or Docker/HDFS commands are needed for this workflow. See [dashboard instructions](../dashboard/README.md).
+
 ## How sorting works
 
 The Mapper parses each line and emits:

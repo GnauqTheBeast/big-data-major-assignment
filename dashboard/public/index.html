@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hadoop Lab · Integer sort</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/pages.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#"><span class="brand-mark">H</span> hadoop<span class="brand-light">lab</span></a>
+    <div class="workspace-label">YOUR WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a href="#architecture"><span>◈</span> Cluster overview</a>
+      <a class="active" href="#files"><span>↕</span> Integer sort <small>01</small></a>
+      <a href="/jobs"><span>≡</span> Job activity</a>
+      <a href="/datanodes"><span>▦</span> DataNodes</a>
+    </nav>
+    <div class="sidebar-note"><span class="dot"></span> LOCAL ENVIRONMENT<p>HDFS · MapReduce · Spark</p><small>A window into your data cluster.</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Workspace <span class="slash">/</span> <strong>Integer sort</strong></span><span class="local-label">localhost <span class="dot"></span></span></header>
+    <div class="content">
+      <nav class="page-tabs" aria-label="Page navigation"><a href="/" aria-current="page">Files</a><a href="/jobs">Job activity</a><a href="/datanodes">DataNodes</a></nav>
+      <div class="page-heading"><div><div class="eyebrow">DISTRIBUTED SYSTEMS, MADE VISIBLE</div><h1>Your data. In order.</h1><p>Upload a file, run Hadoop sort, and see where your data lives.</p></div><button id="refresh" class="button secondary">↻ Refresh</button></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="panel architecture" id="architecture" aria-labelledby="architecture-title">
+        <div class="section-heading"><div><h2 id="architecture-title">Cluster architecture <span id="cluster-count" class="badge">Checking…</span></h2><p>Live container status · block locations update when you select a file</p></div><button class="button secondary" id="start-cluster">Start cluster</button></div>
+        <div id="cluster-error" class="inline-message" hidden></div>
+        <div class="architecture-layout">
+          <div class="entry-node"><div class="node-icon">↕</div><strong>Integer sort</strong><span>Browser → Node.js</span><span class="mode-label">LocalJobRunner</span><small>Job runs in NameNode container</small></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div id="service-groups" class="service-groups" aria-live="polite"></div>
+        </div>
+        <div class="architecture-footer"><span><i class="legend green"></i> Running <i class="legend gray"></i> Stopped / unavailable <i class="legend outline"></i> Holds selected blocks</span><span>YARN & Spark are available services; this sort uses LocalJobRunner.</span></div>
+      </section>
+
+      <div class="work-area" id="files">
+        <section class="panel file-panel" aria-labelledby="files-title">
+          <div class="section-heading"><div><h2 id="files-title">HDFS files</h2><p>Choose an existing file or bring your own.</p></div><span class="badge neutral">HDFS</span></div>
+          <div id="dropzone" class="dropzone"><div class="upload-icon">↑</div><div><strong>Drop a numbers file here</strong><p>One integer per line · large files supported</p></div><label class="button secondary upload-label" for="file-upload">Choose file<input id="file-upload" type="file" aria-label="Upload a numbers file"></label></div>
+          <div id="upload-state" class="upload-state" role="status" hidden><progress id="upload-progress" max="100" value="0"></progress><span id="upload-text"></span></div>
+          <form id="path-form" class="path-form"><button id="parent" type="button" title="Parent directory" aria-label="Parent directory">↑</button><label for="hdfs-path" class="sr-only">HDFS directory</label><input id="hdfs-path" value="/" spellcheck="false"><button type="submit">Go →</button></form>
+          <div class="file-table-wrap"><table><thead><tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">Replicas</th></tr></thead><tbody id="file-list"></tbody></table><div id="file-message" class="empty-state" role="status">Connecting to HDFS…</div></div>
+          <div class="panel-footer"><span id="file-count">—</span><button id="browse-root" class="text-button">Browse root /</button></div>
+        </section>
+        <section class="panel selection-panel" aria-labelledby="selection-title">
+          <div class="section-heading"><div><h2 id="selection-title">File inspector</h2><p>From HDFS blocks to sorted results.</p></div><span class="step-number">02</span></div>
+          <div id="selection-empty" class="empty-state selection-empty"><span class="empty-icon">▤</span><h3>A closer look at your file</h3><p>Select a file to preview its contents,<br>locate its blocks, and start sorting.</p></div>
+          <div id="selection-details" hidden>
+            <div class="selected-file"><strong id="selected-name"></strong><code id="selected-path"></code><a id="download-input" class="text-button">↓ Download file</a></div>
+            <div class="detail-label">CONTENT PREVIEW <span>First 1 KB</span></div><pre id="preview" class="preview"></pre>
+            <div class="detail-label">BLOCK LOCATIONS <button id="refresh-blocks" class="text-button">↻ Refresh</button></div><div id="blocks" class="blocks"></div>
+            <details class="raw-report"><summary>Raw HDFS block report</summary><pre id="block-report"></pre></details>
+            <div class="sort-action"><div><strong>Ascending integer sort</strong><p>Duplicates kept · invalid lines skipped</p></div><button id="sort" class="button primary">Run sort →</button></div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="page-footer"><span>HADOOP LAB <span class="slash">/</span> INTEGER SORT</span><span>Files persist in HDFS. Job history lasts for this server session.</span></footer>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hadoop Lab · Job activity</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/pages.css">
+  <script type="module" src="/jobs.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">H</span> hadoop<span class="brand-light">lab</span></a>
+    <div class="workspace-label">YOUR WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a href="/#architecture"><span>◈</span> Cluster overview</a>
+      <a href="/#files"><span>↕</span> Integer sort <small>01</small></a>
+      <a class="active" href="/jobs" aria-current="page"><span>≡</span> Job activity</a>
+      <a href="/datanodes"><span>▦</span> DataNodes</a>
+    </nav>
+    <div class="sidebar-note"><span class="dot"></span> LOCAL ENVIRONMENT<p>HDFS · MapReduce · Spark</p><small>A window into your data cluster.</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span><a href="/">Workspace</a><span class="slash">/</span><strong>Job activity</strong></span><a class="text-button" href="/">← Back to files</a></header>
+    <div class="content">
+      <nav class="page-tabs" aria-label="Page navigation"><a href="/">Files</a><a href="/jobs" aria-current="page">Job activity</a><a href="/datanodes">DataNodes</a></nav>
+      <div class="page-heading"><div><div class="eyebrow">FOLLOW THE WORK</div><h1>Inside the job.</h1><p>Read the system logs, then walk through the journey your data takes.</p></div><button id="refresh" class="button secondary">↻ Refresh</button></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="panel jobs-panel dedicated-jobs" aria-labelledby="jobs-title">
+        <div class="section-heading"><div><h2 id="jobs-title">Job activity <span class="badge neutral" id="job-count">0</span></h2><p>Original system output · latest 128 KB per job</p></div><span class="session-note">Current server session</span></div>
+        <div id="jobs-empty" class="empty-state">No jobs yet. <a class="text-button" href="/#files">Choose a file and run a sort →</a></div>
+        <div id="job-workspace" class="job-workspace" hidden>
+          <div id="job-list" class="job-list"></div>
+          <div class="job-detail">
+            <div id="job-meta" class="job-meta"></div>
+            <div id="job-paths" class="job-paths"></div>
+            <pre id="job-log" class="job-log" aria-label="System logs"></pre>
+            <div id="job-result" class="job-result"></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel flow-panel" aria-labelledby="flow-title">
+        <div class="section-heading"><div><h2 id="flow-title">How the data flows <span class="badge neutral">Illustrative walkthrough</span></h2><p>Explore the algorithm below. Actual job execution is recorded in the logs above.</p></div></div>
+        <div id="flow"></div>
+      </section>
+      <footer class="page-footer"><span>HADOOP LAB <span class="slash">/</span> JOB ACTIVITY</span><span>Job history lasts for this server session.</span></footer>
+    </div>
+  </main>
+</body>
+</html>
