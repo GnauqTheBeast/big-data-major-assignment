@@ -476,6 +476,101 @@ ResourceManager UI tại <http://localhost:8088> hiển thị application, memor
 
 Nếu chạy job với nhiều Reducer nhưng không thấy application tại port `8088`, trước tiên hãy tìm `job_local...` trong log. Đó thường là bằng chứng job đang chạy local thay vì YARN.
 
+#### 7.5.6. Thực nghiệm Integer Sort với bốn Mapper và ba Reducer
+
+Job Integer Sort được chạy với:
+
+```java
+job.setNumReduceTasks(3);
+```
+
+Input thực nghiệm có kích thước 512 MiB, gồm 33.554.432 dòng số nguyên. Mỗi dòng của file sinh dữ liệu dài 16 byte, do đó:
+
+```text
+33.554.432 record × 16 byte = 536.870.912 byte = 512 MiB
+```
+
+Job tạo ba file kết quả, mỗi Reducer ghi đúng một output partition:
+
+```text
+_SUCCESS
+part-r-00000
+part-r-00001
+part-r-00002
+```
+
+`_SUCCESS` là file rỗng đánh dấu toàn bộ job hoàn tất. Hadoop không tự ghép ba `part-r-*` vì bước ghép đó sẽ phải đọc và ghi lại toàn bộ kết quả, đồng thời tạo thêm một điểm nghẽn tuần tự. Với partitioner mặc định, mỗi part được sắp xếp nội bộ nhưng ghép ba part theo tên file chưa chắc tạo thành thứ tự toàn cục. Muốn dùng nhiều Reducer mà vẫn giữ global order cần dùng `TotalOrderPartitioner` với các khoảng key không giao nhau.
+
+Các counter thực tế thu được:
+
+```text
+Map-Reduce Framework
+    Map input records=33554432
+    Map output records=33554432
+    Map output bytes=134217728
+    Map output materialized bytes=201326664
+    Input split bytes=708
+    Combine input records=0
+    Combine output records=0
+    Reduce input groups=33424210
+    Reduce shuffle bytes=201326664
+    Reduce input records=33554432
+    Reduce output records=33554432
+    Spilled Records=100663296
+    Shuffled Maps=12
+    Failed Shuffles=0
+    Merged Map outputs=12
+    GC time elapsed (ms)=771
+    Total committed heap usage (bytes)=6100615168
+```
+
+Hai counter `Shuffled Maps=12` và `Merged Map outputs=12` là bằng chứng về cấu trúc fan-out của lần chạy này. Job có ba Reducer và mỗi Reducer nhận một partition từ từng Mapper:
+
+```text
+12 shuffled map outputs / 3 Reducer = 4 Mapper
+
+Mapper 0 ─┬─ partition 0 ─► Reducer 0
+          ├─ partition 1 ─► Reducer 1
+          └─ partition 2 ─► Reducer 2
+
+Mapper 1 ─┬─ partition 0 ─► Reducer 0
+          ├─ partition 1 ─► Reducer 1
+          └─ partition 2 ─► Reducer 2
+
+Mapper 2 ─┬─ partition 0 ─► Reducer 0
+          ├─ partition 1 ─► Reducer 1
+          └─ partition 2 ─► Reducer 2
+
+Mapper 3 ─┬─ partition 0 ─► Reducer 0
+          ├─ partition 1 ─► Reducer 1
+          └─ partition 2 ─► Reducer 2
+
+Tổng số map partition được shuffle = 4 Mapper × 3 Reducer = 12
+```
+
+Ý nghĩa của các số đo:
+
+| Counter thực tế | Diễn giải |
+|---|---|
+| `Map input records=33.554.432` | Bốn Mapper đã đọc tổng cộng 33.554.432 dòng input. |
+| `Map output records=33.554.432` | Mỗi dòng hợp lệ tạo đúng một cặp `(IntWritable, NullWritable)`. |
+| `Map output bytes=134.217.728` | Dữ liệu integer dạng trung gian chiếm đúng 128 MiB, trung bình 4 byte cho mỗi record. |
+| `Map output materialized bytes=201.326.664` | Dữ liệu map output sau khi materialize để shuffle chiếm khoảng 192 MiB vì có thêm metadata/framing. |
+| `Reduce shuffle bytes=201.326.664` | Reducer đã nhận đủ lượng dữ liệu materialized qua shuffle. |
+| `Reduce input records=33.554.432` | Không mất record giữa Mapper và Reducer. |
+| `Reduce output records=33.554.432` | Reducer giữ lại toàn bộ record, kể cả số trùng lặp. |
+| `Reduce input groups=33.424.210` | Có 33.424.210 key số nguyên phân biệt. Chênh lệch 130.222 là số lần xuất hiện thêm của các key trùng. |
+| `Combine input/output records=0` | Job không cấu hình Combiner. |
+| `Spilled Records=100.663.296` | Bằng ba lần số record input; Hadoop đếm record qua các lượt spill/merge trung gian, không có nghĩa output bị nhân ba. |
+| `Failed Shuffles=0` | Cả 12 lượt chuyển map partition đều thành công. |
+| `GC time elapsed=771 ms` | Tổng thời gian garbage collection được counter ghi nhận cho các task. |
+| `Total committed heap usage=6.100.615.168 byte` | Counter heap cộng dồn của các task, không phải bằng chứng rằng từng ấy RAM được dùng đồng thời. |
+| `Input split bytes=708` | Kích thước metadata mô tả các input split, không phải kích thước file input. |
+
+Các counter trên chứng minh job đã tạo bốn logical map task, ba logical reduce task và 12 lượt map-output/Reducer trong shuffle. Chúng không chứng minh các task chạy đồng thời. Muốn chứng minh parallel execution cần xem thời điểm bắt đầu/kết thúc của từng task attempt trong ResourceManager UI hoặc YARN logs và xác nhận các khoảng thời gian bị chồng lấn.
+
+Trong dashboard hiện tại, log ghi `Running LocalJobRunner`, vì vậy các Mapper và Reducer của lần chạy trên được thực thi trong client JVM bên trong container `namenode`; NodeManager không chạy các task đó. Ba file `part-r-*` chỉ chứng minh ba Reducer logic đã hoàn tất. Để chứng minh một NodeManager có thể chạy nhiều task đồng thời, phải submit job qua YARN, sau đó kiểm tra task timeline tại <http://localhost:8088>.
+
 ## 8. Kết quả thực nghiệm
 
 Tại thời điểm nghiệm thu:

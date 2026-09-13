@@ -16,3 +16,6 @@ target/
 
 # Runtime DataNode management state (keep the initial exclude file available)
 dashboard/state/datanodes.json
+
+# Large generated integer-sort inputs
+integer-sort/input/random-numbers-*.txt
