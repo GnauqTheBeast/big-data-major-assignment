@@ -152,11 +152,13 @@ export function createApp({ backend = new Hadoop() } = {}) {
         try {
           const filename = url.searchParams.get('name');
           if (!filename || filename.length > 255 || /[/\\\x00-\x1f]/.test(filename)) throw problem('Provide a filename without directory separators.');
+          const scope = url.searchParams.get('scope') || 'integer-sort';
+          if (!['integer-sort', 'top-k'].includes(scope)) throw problem('Choose a valid upload scope.');
           if (req.headers['content-length'] === '0') throw problem('Choose a non-empty file.');
           // Handle disconnects even while the backend is preparing the HDFS directory.
           req.on('error', () => {});
           req.setTimeout(5 * 60 * 1000, () => req.destroy(new Error('Upload stalled for five minutes.')));
-          return json({ path: await backend.upload(req, filename) }, 201);
+          return json({ path: await backend.upload(req, filename, scope) }, 201);
         } finally { uploading = false; req.setTimeout(0); req.resume(); }
       }
       if (req.method === 'GET' && route === '/api/download') {

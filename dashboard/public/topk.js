@@ -237,7 +237,7 @@ async function upload(file) {
   try {
     const data = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/upload?name=' + encodeURIComponent(file.name));
+      xhr.open('POST', '/api/upload?scope=top-k&name=' + encodeURIComponent(file.name));
       xhr.timeout = 0;
       xhr.upload.onprogress = event => {
         if (event.lengthComputable) $('upload-progress').value = event.loaded / event.total * 100;

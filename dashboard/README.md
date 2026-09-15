@@ -37,7 +37,7 @@ The server prevents changing NameNode/DataNode containers during dashboard uploa
 
 `/jobs` is a separate screen with selectable jobs and their system logs at the top. Immediately below is an illustrative 3D walkthrough, with Play/Pause, Previous/Next, zoom, and drag-to-rotate controls. The same explanations are available as text; arrow keys rotate the focused scene.
 
-The example (`7, -2, 7, hello, 3`) shows streaming upload, NameNode metadata, DataNode blocks, mapper output, numeric shuffle/grouping, duplicate-preserving reduction, and HDFS output. It is not a live record-by-record trace or a replay of the selected job. Selected-job input paths and status provide context, while actual results and block locations remain in the file inspector. The compute boxes represent stages inside LocalJobRunner, not separate containers. The scene uses native canvas with projected 3D geometry and adds no external package or model asset.
+The walkthrough adapts to the selected integer-sort, Hadoop Top-K, Spark Top-K, or comparison job. It reads at most the first 1 KB of the job's actual HDFS input to demonstrate intermediate transformations without rendering the raw file; sample-derived values are labeled and are not presented as whole-file results. When a job succeeds, the final stage uses its actual output preview or Top-K rows. The scene uses native canvas with projected 3D geometry and adds no external package or model asset.
 
 ## DataNode management
 
@@ -54,7 +54,7 @@ Desired nodes are saved in `dashboard/state/datanodes.json`. The NameNode reads 
 
 ## Files and limits
 
-Uploads use `/training/integer-sort/uploads/<unique-id>/<filename>`. Output uses `/training/integer-sort/runs/<unique-id>/part-r-00000`. Unsafe filename characters are replaced with `_`; names starting with `.` or `_` are prefixed with `file-` because Hadoop ignores hidden input files. Existing hidden HDFS files remain downloadable, but sorting them returns an explanation.
+Integer-sort uploads use `/training/integer-sort/uploads/<unique-id>/<filename>`, while Top-K uploads use `/training/top-k/uploads/<unique-id>/<filename>`. Output uses the corresponding exercise's `/training/.../runs` area. Unsafe filename characters are replaced with `_`; names starting with `.` or `_` are prefixed with `file-` because Hadoop ignores hidden input files. Existing hidden HDFS files remain downloadable, but sorting them returns an explanation.
 
 Sorting preserves duplicate integers and skips blank, malformed, and out-of-range lines, following `IntegerSortJob.java`. The UI runs one sort/startup operation at a time and accepts one upload at a time. Uploads stream with backpressure from the browser through Node and Docker stdin directly into HDFS. They do not require a whole-file memory buffer or host/container temporary copy. HDFS writes to a hidden staging filename and renames it after success; failed transfers attempt to remove their unique staging directory. Available HDFS capacity, quotas, and transfer speed determine practical upload limits. The browser has no total upload deadline; a connection idle for five minutes is closed. Uploads are not resumable after interruption.
 

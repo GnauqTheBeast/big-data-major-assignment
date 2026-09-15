@@ -33,6 +33,11 @@ export function uploadName(filename) {
   return /^[._]/.test(safeName) ? 'file-' + safeName : safeName;
 }
 
+export function uploadFolder(scope, id = randomUUID()) {
+  const exercise = scope === 'top-k' ? 'top-k' : 'integer-sort';
+  return `/training/${exercise}/uploads/${id}`;
+}
+
 export function validateSortInput(value) {
   const file = validatePath(value);
   if (/^[._]/.test(path.posix.basename(file))) throw Object.assign(new Error('Hadoop ignores filenames beginning with . or _. Upload this file through the dashboard to give it a sortable name.'), { status: 400 });
@@ -160,9 +165,9 @@ export class Hadoop {
     return { blocks: parseBlocks(report), report };
   }
 
-  async upload(input, filename) {
+  async upload(input, filename, scope = 'integer-sort') {
     const safeName = uploadName(filename);
-    const folder = `/training/integer-sort/uploads/${randomUUID()}`;
+    const folder = uploadFolder(scope);
     const destination = `${folder}/${safeName}`;
     const temporary = `${folder}/.uploading`;
     try {
@@ -190,7 +195,7 @@ export class Hadoop {
       await this.docker(['exec', 'namenode', 'mkdir', '-p', build]);
       await this.docker(['cp', path.join(ROOT, 'integer-sort/src/main/java/com/example/hadoop/IntegerSortJob.java'), `namenode:${build}/IntegerSortJob.java`]);
       // This script is constant; the directory is a positional argument, never shell source.
-      await this.docker(['exec', 'namenode', 'sh', '-c', 'cd "$1" && mkdir classes && javac -cp "$(hadoop classpath)" -d classes IntegerSortJob.java && jar cfe job.jar com.example.hadoop.IntegerSortJob -C classes .', 'build', build], { timeout: 120000, onData: log });
+      await this.docker(['exec', 'namenode', 'sh', '-c', 'cd "$1" && mkdir classes && javac -encoding UTF-8 -cp "$(hadoop classpath)" -d classes IntegerSortJob.java && jar cfe job.jar com.example.hadoop.IntegerSortJob -C classes .', 'build', build], { timeout: 120000, onData: log });
       log(`Running LocalJobRunner: ${input} → ${output}\n`);
       await this.docker(['exec', 'namenode', 'hadoop', 'jar', `${build}/job.jar`, input, output], { timeout: 60 * 60 * 1000, onData: log });
     } finally {
@@ -209,7 +214,7 @@ export class Hadoop {
       await this.docker(['exec', 'namenode', 'mkdir', '-p', build]);
       await this.docker(['cp', path.join(ROOT, 'top-k/src/main/java/com/example/hadoop/TopKItemsJob.java'), `namenode:${build}/TopKItemsJob.java`]);
       // This script is constant; the directory is a positional argument, never shell source.
-      await this.docker(['exec', 'namenode', 'sh', '-c', 'cd "$1" && mkdir classes && javac -cp "$(hadoop classpath)" -d classes TopKItemsJob.java && jar cfe job.jar com.example.hadoop.TopKItemsJob -C classes .', 'build', build], { timeout: 120000, onData: log });
+      await this.docker(['exec', 'namenode', 'sh', '-c', 'cd "$1" && mkdir classes && javac -encoding UTF-8 -cp "$(hadoop classpath)" -d classes TopKItemsJob.java && jar cfe job.jar com.example.hadoop.TopKItemsJob -C classes .', 'build', build], { timeout: 120000, onData: log });
       log(`Running LocalJobRunner: ${input} → ${output} (K=${k})\n`);
       await this.docker(['exec', 'namenode', 'hadoop', 'jar', `${build}/job.jar`, input, output, String(k)], { timeout: 60 * 60 * 1000, onData: log });
     } finally {

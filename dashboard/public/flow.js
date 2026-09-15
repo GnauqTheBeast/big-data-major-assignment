@@ -1,58 +1,175 @@
-import { node } from './common.js';
+import { api, node, query } from './common.js';
 
-const stages = [
-  {
-    title: 'User input', active: ['browser'],
-    description: 'The user chooses a text file, with one signed 32-bit integer per line. This small example includes a duplicate and an invalid line.',
-    input: '7\n-2\n7\nhello\n3', output: 'A file ready to upload',
-    detail: 'The original file is kept in HDFS. Validation happens when the mapper reads each line.',
-  },
-  {
-    title: 'Stream upload', active: ['browser', 'server', 'namenode'],
-    description: 'The browser sends file bytes to Node.js. Node streams them into the Hadoop client running in the NameNode container, with backpressure.',
-    input: 'Browser file bytes', output: 'Node.js → Docker stdin → HDFS client',
-    detail: 'The file is not loaded completely into Node memory. The Hadoop client asks NameNode where to write the blocks.',
-  },
-  {
-    title: 'Store in HDFS', active: ['namenode', 'storage'],
-    description: 'NameNode records the file path and block metadata. The HDFS client writes the bytes to DataNodes, whose persistent volumes hold the blocks.',
-    input: 'File → HDFS block(s)', output: 'NameNode: metadata\nDataNode: file bytes',
-    detail: 'This tiny example fits in one block. The current default replication is 1: one copy of a block, not one copy on every DataNode. Adding nodes does not automatically increase replication.',
-  },
-  {
-    title: 'Map', active: ['storage', 'map'],
-    description: 'When Run sort is clicked, the Java job reads the HDFS input. The mapper parses each line and emits an integer key with an empty value.',
-    input: '7, -2, 7, hello, 3', output: '(7, ∅)  (-2, ∅)  (7, ∅)  (3, ∅)',
-    detail: '∅ represents NullWritable. “hello” increments MALFORMED_LINES and is skipped. Empty lines have their own counter; integers outside the 32-bit range are also skipped.',
-  },
-  {
-    title: 'Shuffle & sort', active: ['map', 'shuffle'],
-    description: 'Hadoop orders the mapper output by numeric key and groups identical keys before calling the reducer.',
-    input: '(7, ∅)  (-2, ∅)  (7, ∅)  (3, ∅)', output: '-2 → [∅]\n 3 → [∅]\n 7 → [∅, ∅]',
-    detail: 'The ordering comes from Hadoop’s IntWritable comparison. This demo uses LocalJobRunner: these compute stages are inside one container, not separate network workers.',
-  },
-  {
-    title: 'Reduce', active: ['shuffle', 'reduce'],
-    description: 'The reducer receives keys in ascending order. For each key, it emits that key once for every value in the group, preserving duplicates.',
-    input: '-2 × 1, 3 × 1, 7 × 2', output: '-2\n3\n7\n7',
-    detail: 'There is one reducer, producing a globally sorted result. Adding DataNodes expands storage topology but does not add reducers or distribute this computation.',
-  },
-  {
-    title: 'Write output', active: ['reduce', 'output', 'storage'],
-    description: 'The job writes the sorted result into a new HDFS output directory. Its part-r-00000 file can be inspected or downloaded through the UI.',
-    input: 'Sorted integers', output: 'part-r-00000\n_SUCCESS',
-    detail: 'HDFS stores output blocks on DataNodes too. The input stays intact, and every dashboard run gets its own output directory.',
-  },
-];
+const idleStages = [{
+  title: 'Select a job', active: ['browser'],
+  description: 'Choose a job above to build this walkthrough from its actual HDFS input and execution engine.',
+  input: 'No job selected', output: 'Waiting for a job',
+  detail: 'Only the first 1 KB is read to demonstrate intermediate transformations; the complete input is never rendered here.',
+}];
+
+const previewLines = text => text ? text.split(/\r?\n/).filter((line, index, rows) => line || index < rows.length - 1) : [];
+const clipped = (values, limit = 8) => values.slice(0, limit).join('\n') + (values.length > limit ? `\n… ${values.length - limit} more in preview` : '');
+const sampleLabel = (lines, available = true) => available
+  ? `${lines.length} line${lines.length === 1 ? '' : 's'} sampled from the first 1 KB`
+  : 'Input preview unavailable';
+const outputState = job => job.status === 'succeeded' ? 'Completed output' : job.status === 'failed' ? 'No output produced' : 'Output pending';
+
+function inputStages(job, lines, available) {
+  return [
+    {
+      title: 'Selected HDFS input', active: ['browser', 'namenode'],
+      description: 'The walkthrough reads a bounded preview from the selected job’s real HDFS input. It summarizes the sample without displaying the raw file.',
+      input: job.input, output: sampleLabel(lines, available),
+      detail: 'The preview is for explaining transformations only. Hadoop and Spark process the complete file.',
+    },
+    {
+      title: 'Read HDFS blocks', active: ['namenode', 'storage'],
+      description: 'NameNode resolves the path to block locations, then the selected engine reads the file bytes from DataNodes.',
+      input: 'HDFS path metadata', output: 'Input splits / DataFrame partitions',
+      detail: 'The visualization uses a 1 KB sample; the real job reads every input split and does not load the whole file into the dashboard.',
+    },
+  ];
+}
+
+function sortStages(job, lines, resultText, available) {
+  const parsed = lines.map(line => line.trim());
+  const valid = parsed.filter(line => /^[+-]?\d+$/.test(line)).map(Number).filter(value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647);
+  const skipped = parsed.length - valid.length;
+  const sorted = [...valid].sort((a, b) => a - b);
+  const actual = previewLines(resultText).filter(Boolean);
+  return [
+    ...inputStages(job, lines, available),
+    {
+      title: 'Map integers', active: ['storage', 'map'],
+      description: 'The mapper trims and parses each sampled line, emits valid IntWritable keys, and skips empty, malformed, or out-of-range values.',
+      input: sampleLabel(lines, available), output: available ? `${valid.length} valid keys\n${skipped} skipped lines` : 'Waiting for readable input',
+      detail: clipped(valid.map(value => `emit (${value}, ∅)`)) || 'No valid integer keys in the preview.',
+    },
+    {
+      title: 'Numeric shuffle', active: ['map', 'shuffle'],
+      description: 'Hadoop groups duplicate integer keys and orders groups using numeric IntWritable comparison.',
+      input: `${valid.length} mapped keys`, output: clipped([...new Map(sorted.map(value => [value, sorted.filter(item => item === value).length]))].map(([value, count]) => `${value} × ${count}`)) || 'No groups in preview',
+      detail: 'These groups come from the selected input preview; the real shuffle includes all mapped records.',
+    },
+    {
+      title: 'Reduce in order', active: ['shuffle', 'reduce'],
+      description: 'One reducer emits each numeric key once per grouped value, preserving duplicates in global ascending order.',
+      input: `${new Set(valid).size} preview groups`, output: clipped(sorted.map(String)) || 'No preview values',
+      detail: 'This is a sample-derived demonstration, not a replacement for the job output.',
+    },
+    {
+      title: 'Write actual result', active: ['reduce', 'output', 'storage'],
+      description: 'The reducer writes part-r-00000 to the job’s HDFS output directory.',
+      input: outputState(job), output: actual.length ? clipped(actual) : outputState(job),
+      detail: actual.length ? 'These values are read from the selected job’s actual output file.' : `Job status: ${job.status}.`,
+    },
+  ];
+}
+
+function countItems(lines) {
+  const counts = new Map();
+  for (const raw of lines) {
+    const item = raw.trim();
+    if (item) counts.set(item, (counts.get(item) || 0) + 1);
+  }
+  return [...counts].map(([item, count]) => ({ item, count }))
+    .sort((left, right) => right.count - left.count || (left.item < right.item ? -1 : left.item > right.item ? 1 : 0));
+}
+
+const formatRows = rows => clipped((rows || []).map(row => `${row.item} → ${row.count}`)) || 'No rows available';
+
+function topKStages(job, lines, available) {
+  const counts = countItems(lines);
+  const k = job.k || 1;
+  const candidates = counts.slice(0, k);
+  const actual = job.comparison?.hadoop || job.rows;
+  const base = inputStages(job, lines, available);
+  if (job.kind === 'topk-spark') return [
+    ...base,
+    {
+      title: 'Clean DataFrame', active: ['storage', 'map'],
+      description: 'Spark reads text rows, trims each item, removes empty rows, and keeps a single item column.',
+      input: sampleLabel(lines, available), output: available ? `${lines.filter(line => line.trim()).length} non-empty sampled rows` : 'Waiting for readable input',
+      detail: 'Counts shown later are derived from the selected input preview; Spark processes every partition.',
+    },
+    {
+      title: 'Group and count', active: ['map', 'shuffle'],
+      description: 'Spark groups equal item values across partitions and counts each group.',
+      input: `${lines.filter(line => line.trim()).length} sampled rows`, output: formatRows(counts),
+      detail: 'This is the group/count transformation applied to the preview sample.',
+    },
+    {
+      title: `Order and limit ${k}`, active: ['shuffle', 'reduce'],
+      description: 'Spark orders by count descending, breaks ties by item ascending, and limits the DataFrame to K rows.',
+      input: `${counts.length} sampled groups`, output: formatRows(candidates),
+      detail: 'Sample candidates demonstrate the operation; they may differ from whole-file winners.',
+    },
+    {
+      title: 'Write actual result', active: ['reduce', 'output', 'storage'],
+      description: 'Spark writes the selected job’s final Top-K rows as CSV part files in HDFS.',
+      input: outputState(job), output: actual?.length ? formatRows(actual) : outputState(job),
+      detail: actual?.length ? 'These are the selected job’s actual full-input results.' : `Job status: ${job.status}.`,
+    },
+  ];
+  const stages = [
+    ...base,
+    {
+      title: 'Map item counts', active: ['storage', 'map'],
+      description: 'The counting mapper trims each line, skips empty rows, and emits one count for every item occurrence.',
+      input: sampleLabel(lines, available), output: available ? `${lines.filter(line => line.trim()).length} sampled (item, 1) pairs` : 'Waiting for readable input',
+      detail: 'The raw input stays hidden; this count comes from the selected input preview.',
+    },
+    {
+      title: 'Combine and reduce', active: ['map', 'shuffle', 'reduce'],
+      description: 'Hadoop groups equal items and sums their occurrences into one count per distinct item.',
+      input: `${lines.filter(line => line.trim()).length} sampled pairs`, output: formatRows(counts),
+      detail: 'These intermediate counts describe only the preview sample.',
+    },
+    {
+      title: `Keep local Top-${k}`, active: ['reduce', 'map'],
+      description: 'Each second-stage mapper keeps a bounded min-heap so only its strongest K candidates continue.',
+      input: `${counts.length} sampled item counts`, output: formatRows(candidates),
+      detail: 'The heap limits memory and network traffic. Sample candidates may differ from the whole-file result.',
+    },
+    {
+      title: `Select global Top-${k}`, active: ['map', 'shuffle', 'reduce'],
+      description: 'One reducer merges mapper candidates, orders by count descending with item-name tie-breaking, and emits the final K.',
+      input: 'Local Top-K candidates', output: actual?.length ? formatRows(actual) : outputState(job),
+      detail: actual?.length ? 'These rows are the selected Hadoop job’s actual full-input result.' : `Job status: ${job.status}.`,
+    },
+  ];
+  if (job.kind === 'topk-compare') stages.push(
+    {
+      title: `Run Spark Top-${k}`, active: ['storage', 'map', 'shuffle', 'reduce'],
+      description: 'Spark independently cleans the same HDFS input, groups and counts items, then orders and limits the DataFrame to K rows.',
+      input: sampleLabel(lines, available), output: job.comparison?.spark?.length ? formatRows(job.comparison.spark) : formatRows(candidates),
+      detail: job.comparison?.spark?.length ? 'These rows are Spark’s actual full-input result.' : 'The displayed candidates come from the bounded input preview while the job is incomplete.',
+    },
+    {
+      title: 'Compare engines', active: ['reduce', 'output', 'storage'],
+      description: 'The dashboard compares Hadoop and Spark rows in deterministic order after both jobs finish.',
+      input: job.comparison ? `Hadoop\n${formatRows(job.comparison.hadoop)}\n\nSpark\n${formatRows(job.comparison.spark)}` : outputState(job),
+      output: job.comparison ? (job.comparison.match ? 'Results match' : 'Results differ') : outputState(job),
+      detail: job.comparison ? 'Both sides shown here are actual full-input outputs.' : `Job status: ${job.status}.`,
+    },
+  );
+  else stages.push({
+    title: 'Write actual result', active: ['reduce', 'output', 'storage'],
+    description: 'Hadoop writes the final rows to part-r-00000 in the selected job’s output directory.',
+    input: actual?.length ? formatRows(actual) : outputState(job), output: job.result || outputState(job),
+    detail: actual?.length ? 'The displayed rows come from the selected job’s actual full-input result.' : `Job status: ${job.status}.`,
+  });
+  return stages;
+}
 
 const machines = [
-  { id: 'browser', label: 'User file', x: -300, z: -100, color: '#92b7a6', height: 45 },
-  { id: 'server', label: 'Node.js', x: -150, z: -100, color: '#489478', height: 65 },
+  { id: 'browser', label: 'Selected job', x: -300, z: -100, color: '#92b7a6', height: 45 },
+  { id: 'server', label: 'Dashboard', x: -150, z: -100, color: '#489478', height: 65 },
   { id: 'namenode', label: 'NameNode', x: 0, z: -100, color: '#4f87a5', height: 95 },
   { id: 'storage', label: 'DataNode(s)', x: 190, z: -100, color: '#c89c57', height: 75 },
-  { id: 'map', label: 'Map', x: -150, z: 100, color: '#6c86bc', height: 48 },
-  { id: 'shuffle', label: 'Shuffle / sort', x: 0, z: 100, color: '#8e79b7', height: 62 },
-  { id: 'reduce', label: 'Reduce', x: 150, z: 100, color: '#599ca0', height: 48 },
+  { id: 'map', label: 'Map / transform', x: -150, z: 100, color: '#6c86bc', height: 48 },
+  { id: 'shuffle', label: 'Shuffle / group', x: 0, z: 100, color: '#8e79b7', height: 62 },
+  { id: 'reduce', label: 'Reduce / limit', x: 150, z: 100, color: '#599ca0', height: 48 },
   { id: 'output', label: 'HDFS output', x: 300, z: 100, color: '#489478', height: 45 },
 ];
 
@@ -96,7 +213,7 @@ function createScene(canvas, currentStage) {
     }
     for (let x = -440; x <= 440; x += 40) line(project(x, 0, -240), project(x, 0, 240));
     for (let z = -240; z <= 240; z += 40) line(project(-440, 0, z), project(440, 0, z));
-    const stage = stages[currentStage()];
+    const stage = currentStage();
     const active = stage.active.map(id => machines.find(machine => machine.id === id));
     for (let index = 1; index < active.length; index++) {
       const a = active[index - 1], b = active[index];
@@ -161,14 +278,15 @@ function createScene(canvas, currentStage) {
 }
 
 export function createFlow(root) {
-  let step = 0, timer = null;
-  const context = node('p', 'flow-context', 'Example data: 7, -2, 7, hello, 3. This illustration does not replay individual records from the selected job.');
+  let step = 0, timer = null, stages = idleStages, requestVersion = 0, signature = '';
+  const previewCache = new Map();
+  const context = node('p', 'flow-context', 'Select a job to demonstrate its real data flow.');
   const steps = node('div', 'flow-steps');
   steps.setAttribute('aria-label', 'Data-flow stages');
   const canvas = node('canvas', 'flow-scene');
   canvas.tabIndex = 0;
   canvas.setAttribute('aria-label', 'Illustrative 3D flow. Drag or use left and right arrows to rotate. The text below explains every stage.');
-  const caption = node('div', 'scene-caption', '3D illustration · drag to rotate · Map / Shuffle / Reduce are stages inside LocalJobRunner, not separate containers');
+  const caption = node('div', 'scene-caption', '3D illustration · drag to rotate · intermediate values use at most the first 1 KB of the selected input');
   const controls = node('div', 'flow-controls');
   const previous = node('button', 'button secondary', '← Previous');
   const play = node('button', 'button primary', '▶ Play');
@@ -189,7 +307,7 @@ export function createFlow(root) {
   const note = node('p', 'flow-note');
   detail.append(heading, description, values, note);
   root.append(context, steps, canvas, caption, controls, detail);
-  const scene = createScene(canvas, () => step);
+  const scene = createScene(canvas, () => stages[step]);
 
   function render() {
     steps.replaceChildren();
@@ -218,13 +336,38 @@ export function createFlow(root) {
   reset.addEventListener('click', () => scene.reset?.());
   zoom.addEventListener('input', () => scene.zoom?.(Number(zoom.value)));
   render();
+  async function preview(path) {
+    if (!path) return '';
+    if (!previewCache.has(path)) previewCache.set(path, api('/api/preview' + query(path)).then(data => data.text || '').catch(() => null));
+    return previewCache.get(path);
+  }
   return {
-    setJob(job) {
-      context.textContent = job?.kind === 'sort'
-        ? `Selected job: ${job.status} · ${job.input}. The scene uses example data (7, -2, 7, hello, 3), not a live record trace. Use the logs above and the file inspector for actual results and block locations.`
-        : ['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job?.kind)
-          ? `Selected job: ${job.status} · K=${job.k ?? '—'} · ${job.input}. This scene illustrates the integer-sort pipeline; the top-K result table above holds the actual Hadoop/Spark answers.`
-          : 'Example data: 7, -2, 7, hello, 3. This is an illustrative sort walkthrough; cluster maintenance operations have their actual logs above.';
+    async setJob(job) {
+      const nextSignature = job ? `${job.id}:${job.status}:${JSON.stringify(job.rows)}:${JSON.stringify(job.comparison)}` : 'none';
+      if (nextSignature === signature) return;
+      signature = nextSignature;
+      const version = ++requestVersion;
+      stop(); step = 0;
+      if (!job || !['sort', 'topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind)) {
+        stages = idleStages;
+        context.textContent = job ? `The selected ${job.kind} operation has no record-processing walkthrough.` : 'Select a job to demonstrate its real data flow.';
+        render(); return;
+      }
+      context.textContent = `Loading a bounded preview from ${job.input}…`;
+      stages = [{ ...idleStages[0], title: 'Load selected input', input: job.input, output: 'Reading first 1 KB…' }];
+      render();
+      const [inputText, resultText] = await Promise.all([
+        preview(job.input),
+        job.kind === 'sort' && job.status === 'succeeded' ? preview(job.result) : Promise.resolve(''),
+      ]);
+      if (version !== requestVersion) return;
+      const available = inputText !== null;
+      const lines = previewLines(inputText || '');
+      stages = job.kind === 'sort' ? sortStages(job, lines, resultText, available) : topKStages(job, lines, available);
+      context.textContent = job.kind === 'sort'
+        ? `Selected integer-sort job · ${job.status} · ${sampleLabel(lines, available)} for intermediate stages.`
+        : `Selected ${job.kind === 'topk-spark' ? 'Spark' : job.kind === 'topk-compare' ? 'Hadoop/Spark comparison' : 'Hadoop'} Top-K job · ${job.status} · K=${job.k ?? '—'} · ${sampleLabel(lines, available)} for intermediate stages.`;
+      render();
     },
   };
 }
