@@ -7,6 +7,28 @@ let refreshing = false;
 let renderedId = null;
 const flow = createFlow($('flow'));
 
+function renderRows(tbody, rows) {
+  tbody.replaceChildren();
+  if (!rows || !rows.length) {
+    const cell = node('td', '', 'No rows returned.');
+    cell.colSpan = 3;
+    tbody.append(node('tr', '', cell));
+    return;
+  }
+  rows.forEach((row, index) => {
+    tbody.append(node('tr', '', node('td', '', `#${index + 1}`), node('td', '', row.item), node('td', '', row.count ?? '—')));
+  });
+}
+
+function resultTable(rows) {
+  const table = node('table', 'topk-table');
+  table.append(node('thead', '', node('tr', '', node('th', '', 'Rank'), node('th', '', 'Item'), node('th', '', 'Count'))));
+  const tbody = node('tbody');
+  renderRows(tbody, rows);
+  table.append(tbody);
+  return table;
+}
+
 function render() {
   $('job-count').textContent = jobs.length;
   $('jobs-empty').hidden = jobs.length > 0;
@@ -28,6 +50,13 @@ function render() {
   $('job-paths').replaceChildren();
   if (job.kind === 'sort') {
     $('job-paths').append(node('div', '', `Input: ${job.input}`), node('div', '', `Output: ${job.output}`));
+  } else if (['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind)) {
+    $('job-paths').append(node('div', '', `Input: ${job.input} · K=${job.k ?? '—'}`));
+    if (job.outputs) {
+      $('job-paths').append(node('div', '', `Hadoop output: ${job.outputs.hadoop}`), node('div', '', `Spark output: ${job.outputs.spark}`));
+    } else {
+      $('job-paths').append(node('div', '', `Output: ${job.output}`));
+    }
   }
   const log = $('job-log');
   const follow = renderedId !== job.id || log.scrollHeight - log.scrollTop - log.clientHeight < 60;
@@ -35,7 +64,23 @@ function render() {
   if (follow) log.scrollTop = log.scrollHeight;
   renderedId = job.id;
   $('job-result').replaceChildren();
-  if (job.result) {
+  const topk = ['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind);
+  if (topk && job.status === 'succeeded' && (job.rows || job.comparison)) {
+    if (job.kind === 'topk-compare' && job.comparison) {
+      $('job-result').append(node('p', 'topk-verdict ' + (job.comparison.match ? 'match' : 'mismatch'),
+        job.comparison.match ? 'Both engines agree.' : 'Engines disagree — compare both sides.'));
+      for (const [title, rows] of [['Hadoop MapReduce', job.comparison.hadoop], ['Spark SQL', job.comparison.spark]]) {
+        $('job-result').append(node('div', 'detail-label', title), resultTable(rows));
+      }
+    } else {
+      $('job-result').append(resultTable(job.rows));
+    }
+    const inspect = node('a', 'button secondary', job.kind === 'topk-spark' ? 'Inspect Spark output dir' : 'Inspect result');
+    inspect.href = '/topk?file=' + encodeURIComponent(job.result) + '#files';
+    const download = node('a', 'text-button', '↓ Download result');
+    download.href = downloadURL(job.result);
+    $('job-result').append(inspect, download);
+  } else if (job.result) {
     const inspect = node('a', 'button secondary', 'Inspect sorted output');
     inspect.href = '/?file=' + encodeURIComponent(job.result) + '#files';
     const download = node('a', 'text-button', '↓ Download result');

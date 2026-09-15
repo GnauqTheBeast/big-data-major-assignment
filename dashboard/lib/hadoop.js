@@ -39,6 +39,27 @@ export function validateSortInput(value) {
   return file;
 }
 
+export function validateTopK(value) {
+  const k = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (!Number.isInteger(k) || k < 1 || k > 1000) {
+    throw Object.assign(new Error('K must be an integer between 1 and 1000.'), { status: 400 });
+  }
+  return k;
+}
+
+export function parseTopKRows(text) {
+  return text.split('\n').flatMap(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return [];
+    const separator = trimmed.lastIndexOf('\t') >= 0 ? '\t' : ',';
+    const index = trimmed.lastIndexOf(separator);
+    const item = (index >= 0 ? trimmed.slice(0, index) : trimmed).trim();
+    const count = index >= 0 ? Number(trimmed.slice(index + 1).trim()) : NaN;
+    if (!item) return [];
+    return [{ item, count: Number.isInteger(count) && count >= 0 ? count : null }];
+  });
+}
+
 export function parseListing(output) {
   return output.split('\n').flatMap(line => {
     const m = line.match(/^([d-]\S+)\s+(\S+)\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(.+)$/);
@@ -175,6 +196,69 @@ export class Hadoop {
     } finally {
       await this.docker(['exec', 'namenode', 'rm', '-rf', build]).catch(() => {});
     }
+  }
+
+  async topkHadoop(input, output, k, log) {
+    validateSortInput(input);
+    await this.requireFile(input);
+    validateTopK(k);
+    validatePath(output);
+    const build = `/tmp/topk-dashboard-${randomUUID()}`;
+    log(`Building the top-k JAR with the container Hadoop libraries…\nK = ${k}\n`);
+    try {
+      await this.docker(['exec', 'namenode', 'mkdir', '-p', build]);
+      await this.docker(['cp', path.join(ROOT, 'top-k/src/main/java/com/example/hadoop/TopKItemsJob.java'), `namenode:${build}/TopKItemsJob.java`]);
+      // This script is constant; the directory is a positional argument, never shell source.
+      await this.docker(['exec', 'namenode', 'sh', '-c', 'cd "$1" && mkdir classes && javac -cp "$(hadoop classpath)" -d classes TopKItemsJob.java && jar cfe job.jar com.example.hadoop.TopKItemsJob -C classes .', 'build', build], { timeout: 120000, onData: log });
+      log(`Running LocalJobRunner: ${input} → ${output} (K=${k})\n`);
+      await this.docker(['exec', 'namenode', 'hadoop', 'jar', `${build}/job.jar`, input, output, String(k)], { timeout: 60 * 60 * 1000, onData: log });
+    } finally {
+      await this.docker(['exec', 'namenode', 'rm', '-rf', build]).catch(() => {});
+    }
+  }
+
+  async topkSpark(input, output, k, log) {
+    validateSortInput(input);
+    await this.requireFile(input);
+    validateTopK(k);
+    validatePath(output);
+    log(`Granting the spark user write access to the output parent…\n`);
+    const parent = path.posix.dirname(output);
+    await this.hdfs(['dfs', '-mkdir', '-p', parent]);
+    await this.hdfs(['dfs', '-chown', 'spark:supergroup', parent]).catch(error => {
+      throw new Error('Could not grant HDFS write access to spark. Run as an HDFS superuser.\n' + error.message);
+    });
+    const jarHost = path.join(ROOT, 'spark-top-k/target/spark-top-k-1.0-SNAPSHOT.jar');
+    log(`Copying the Spark JAR to spark-master and submitting…\nK = ${k}\n`);
+    try {
+      await this.docker(['cp', jarHost, 'spark-master:/tmp/spark-top-k-dashboard.jar']);
+    } catch (error) {
+      throw new Error(`Spark JAR not found at spark-top-k/target/spark-top-k-1.0-SNAPSHOT.jar. Build it first (cd spark-top-k && mvn clean package).\n${error.message}`);
+    }
+    await this.docker(['exec', 'spark-master',
+      '/opt/bitnami/spark/bin/spark-submit',
+      '--class', 'com.example.spark.SparkTopKDF',
+      '--master', 'spark://spark-master:7077',
+      '--deploy-mode', 'client',
+      '/tmp/spark-top-k-dashboard.jar',
+      `hdfs://namenode:9000${input}`,
+      `hdfs://namenode:9000${output}`,
+      String(k),
+    ], { timeout: 60 * 60 * 1000, onData: log });
+  }
+
+  async topkResult(output, engine) {
+    await this.requireFile(engine === 'spark'
+      ? path.posix.join(output, '_SUCCESS')
+      : `${output}/part-r-00000`).catch(() => this.requireFile(output));
+    const pattern = engine === 'spark' ? `${output}/part-*.csv` : `${output}/part-r-00000`;
+    const text = await this.hdfs(['dfs', '-cat', pattern]).catch(async () => {
+      const listing = await this.list(output);
+      const part = listing.find(file => !file.directory && /^part-/.test(file.name));
+      if (!part) throw new Error('No result part file found in the output directory.');
+      return this.hdfs(['dfs', '-cat', part.path]);
+    });
+    return { rows: parseTopKRows(text), raw: text.slice(0, 4096) };
   }
 
   download(input) {

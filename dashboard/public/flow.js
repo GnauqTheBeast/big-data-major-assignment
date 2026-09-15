@@ -222,7 +222,9 @@ export function createFlow(root) {
     setJob(job) {
       context.textContent = job?.kind === 'sort'
         ? `Selected job: ${job.status} · ${job.input}. The scene uses example data (7, -2, 7, hello, 3), not a live record trace. Use the logs above and the file inspector for actual results and block locations.`
-        : 'Example data: 7, -2, 7, hello, 3. This is an illustrative sort walkthrough; cluster maintenance operations have their actual logs above.';
+        : ['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job?.kind)
+          ? `Selected job: ${job.status} · K=${job.k ?? '—'} · ${job.input}. This scene illustrates the integer-sort pipeline; the top-K result table above holds the actual Hadoop/Spark answers.`
+          : 'Example data: 7, -2, 7, hello, 3. This is an illustrative sort walkthrough; cluster maintenance operations have their actual logs above.';
     },
   };
 }
