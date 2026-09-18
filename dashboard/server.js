@@ -38,42 +38,24 @@ function body(req, limit) {
 
 export function createApp({ backend = new Hadoop() } = {}) {
   const datanodes = new DataNodes(backend);
-  const TOPK_KINDS = new Set(['topk-hadoop', 'topk-spark', 'topk-compare']);
-  const topkOutputPaths = output => ({ hadoop: `${output}/hadoop`, spark: `${output}/spark` });
-  const jobs = new Jobs(async (input, output, log, kind, extra = {}, record) => {
+  const jobs = new Jobs(async (input, output, log, kind, extra = {}) => {
     if (kind === 'cluster') return datanodes.startCluster(log);
     if (kind === 'add-node') return datanodes.add(input, log);
     if (kind === 'remove-node') return datanodes.remove(input, log);
     if (kind === 'rebalance') return datanodes.rebalance(log);
-    if (TOPK_KINDS.has(kind)) {
+    if (kind === 'topk-hadoop') {
       const k = validateTopK(extra?.k);
-      const paths = topkOutputPaths(output);
-      if (kind === 'topk-hadoop') {
-        await backend.topkHadoop(input, paths.hadoop, k, log);
-        return backend.topkResult(paths.hadoop, 'hadoop');
-      }
-      if (kind === 'topk-spark') {
-        await backend.topkSpark(input, paths.spark, k, log);
-        return backend.topkResult(paths.spark, 'spark');
-      }
-      await backend.topkHadoop(input, paths.hadoop, k, log);
-      const hadoop = await backend.topkResult(paths.hadoop, 'hadoop');
-      await backend.topkSpark(input, paths.spark, k, log);
-      const spark = await backend.topkResult(paths.spark, 'spark');
-      const normalize = rows => (rows || []).map(row => `${row.item}\t${row.count}`).join('\n');
-      const match = normalize(hadoop.rows) === normalize(spark.rows);
-      log(match ? '\nBoth engines agree on the top-K answer.\n' : '\nThe engines disagree — inspect both outputs below.\n');
-      record.outputs = paths;
-      return { rows: hadoop.rows, comparison: { match, hadoop: hadoop.rows, spark: spark.rows } };
+      await backend.topkHadoop(input, output, k, log);
+      return backend.topkResult(output);
     }
     return backend.sort(input, output, log);
   });
   let uploading = false;
   let downloads = 0;
   const controls = new Map();
-  const maintenance = () => jobs.list().some(job => job.status === 'running' && job.kind !== 'sort');
+  const maintenance = () => jobs.list().some(job => job.status === 'running' && !['sort', 'topk-hadoop'].includes(job.kind));
   const hdfsChanging = () => controls.has('namenode') || DATA_NODES.some(name => controls.has(name)) || maintenance();
-  const hdfsBusy = () => uploading || downloads > 0 || jobs.list().some(job => job.status === 'running' && job.kind === 'sort');
+  const hdfsBusy = () => uploading || downloads > 0 || jobs.list().some(job => job.status === 'running' && ['sort', 'topk-hadoop'].includes(job.kind));
   const requireHdfsStable = () => { if (hdfsChanging()) throw problem('An HDFS container is starting or stopping. Wait for it to finish.', 409); };
   const server = http.createServer(async (req, res) => {
     const json = (value, status = 200) => {
@@ -137,7 +119,7 @@ export function createApp({ backend = new Hadoop() } = {}) {
         try { data = JSON.parse((await body(req, 8192)).toString()); }
         catch (error) { if (error.status) throw error; throw problem('Invalid JSON request.'); }
         const kind = data?.kind || 'sort';
-        if (!['sort', 'topk-hadoop', 'topk-spark', 'topk-compare'].includes(kind)) throw problem('Unknown job kind.');
+        if (!['sort', 'topk-hadoop'].includes(kind)) throw problem('Unknown job kind.');
         const input = validateSortInput(data?.input);
         const k = kind === 'sort' ? null : validateTopK(data?.k);
         requireHdfsStable();

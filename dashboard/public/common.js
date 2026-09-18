@@ -1,9 +1,13 @@
 export const $ = id => document.getElementById(id);
 
-export function node(tag, className, text) {
+export function node(tag, className, ...children) {
   const element = document.createElement(tag);
   if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
+  for (const child of children) {
+    if (child == null) continue;
+    if (typeof child === 'string' || typeof child === 'number') element.append(String(child));
+    else element.append(child);
+  }
   return element;
 }
 
@@ -35,9 +39,7 @@ export const jobURL = id => '/jobs?job=' + encodeURIComponent(id);
 
 export function jobTitle(job) {
   if (job.kind === 'sort') return basename(job.input);
-  if (job.kind === 'topk-hadoop') return `Top-K (Hadoop) K=${job.k ?? '?'} · ${basename(job.input)}`;
-  if (job.kind === 'topk-spark') return `Top-K (Spark) K=${job.k ?? '?'} · ${basename(job.input)}`;
-  if (job.kind === 'topk-compare') return `Top-K compare K=${job.k ?? '?'} · ${basename(job.input)}`;
+  if (job.kind === 'topk-hadoop') return `Top-K K=${job.k ?? '?'} · ${basename(job.input)}`;
   if (job.kind === 'cluster') return 'Start cluster';
   if (job.kind === 'add-node') return `Add ${job.input}`;
   if (job.kind === 'remove-node') return `Remove ${job.input} safely`;

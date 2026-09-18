@@ -12,8 +12,6 @@ export const SERVICES = [
   { name: 'datanode-3', label: 'DataNode 3', role: 'Stores file blocks', group: 'hdfs', port: 9867, optional: true },
   { name: 'resourcemanager', label: 'ResourceManager', role: 'YARN resource scheduling', group: 'yarn', port: 8088 },
   { name: 'nodemanager', label: 'NodeManager', role: 'YARN task execution', group: 'yarn', port: 8042 },
-  { name: 'spark-master', label: 'Spark Master', role: 'Spark application scheduling', group: 'spark', port: 8080 },
-  { name: 'spark-worker', label: 'Spark Worker', role: 'Spark task execution', group: 'spark' },
 ];
 
 export function validateServiceAction(service, action) {
@@ -222,42 +220,9 @@ export class Hadoop {
     }
   }
 
-  async topkSpark(input, output, k, log) {
-    validateSortInput(input);
-    await this.requireFile(input);
-    validateTopK(k);
-    validatePath(output);
-    log(`Granting the spark user write access to the output parent…\n`);
-    const parent = path.posix.dirname(output);
-    await this.hdfs(['dfs', '-mkdir', '-p', parent]);
-    await this.hdfs(['dfs', '-chown', 'spark:supergroup', parent]).catch(error => {
-      throw new Error('Could not grant HDFS write access to spark. Run as an HDFS superuser.\n' + error.message);
-    });
-    const jarHost = path.join(ROOT, 'spark-top-k/target/spark-top-k-1.0-SNAPSHOT.jar');
-    log(`Copying the Spark JAR to spark-master and submitting…\nK = ${k}\n`);
-    try {
-      await this.docker(['cp', jarHost, 'spark-master:/tmp/spark-top-k-dashboard.jar']);
-    } catch (error) {
-      throw new Error(`Spark JAR not found at spark-top-k/target/spark-top-k-1.0-SNAPSHOT.jar. Build it first (cd spark-top-k && mvn clean package).\n${error.message}`);
-    }
-    await this.docker(['exec', 'spark-master',
-      '/opt/bitnami/spark/bin/spark-submit',
-      '--class', 'com.example.spark.SparkTopKDF',
-      '--master', 'spark://spark-master:7077',
-      '--deploy-mode', 'client',
-      '/tmp/spark-top-k-dashboard.jar',
-      `hdfs://namenode:9000${input}`,
-      `hdfs://namenode:9000${output}`,
-      String(k),
-    ], { timeout: 60 * 60 * 1000, onData: log });
-  }
-
-  async topkResult(output, engine) {
-    await this.requireFile(engine === 'spark'
-      ? path.posix.join(output, '_SUCCESS')
-      : `${output}/part-r-00000`).catch(() => this.requireFile(output));
-    const pattern = engine === 'spark' ? `${output}/part-*.csv` : `${output}/part-r-00000`;
-    const text = await this.hdfs(['dfs', '-cat', pattern]).catch(async () => {
+  async topkResult(output) {
+    await this.requireFile(`${output}/part-r-00000`).catch(() => this.requireFile(output));
+    const text = await this.hdfs(['dfs', '-cat', `${output}/part-r-00000`]).catch(async () => {
       const listing = await this.list(output);
       const part = listing.find(file => !file.directory && /^part-/.test(file.name));
       if (!part) throw new Error('No result part file found in the output directory.');

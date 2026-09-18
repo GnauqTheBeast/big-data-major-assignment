@@ -102,34 +102,6 @@ services:
     networks:
       - bigdata-net
 
-  # ==============================
-  # APACHE SPARK
-  # ==============================
-  spark-master:
-    image: bitnamilegacy/spark:3.5.0
-    container_name: spark-master
-    environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-    ports:
-      - "8080:8080" # Spark Master Web UI
-      - "7077:7077" # Spark Master Port
-    networks:
-      - bigdata-net
-
-  spark-worker:
-    image: bitnamilegacy/spark:3.5.0
-    container_name: spark-worker
-    depends_on:
-      - spark-master
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
-      - SPARK_WORKER_CORES=2
-    networks:
-      - bigdata-net
 
 volumes:
   hadoop_namenode:

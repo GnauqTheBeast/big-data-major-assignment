@@ -50,13 +50,8 @@ function render() {
   $('job-paths').replaceChildren();
   if (job.kind === 'sort') {
     $('job-paths').append(node('div', '', `Input: ${job.input}`), node('div', '', `Output: ${job.output}`));
-  } else if (['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind)) {
-    $('job-paths').append(node('div', '', `Input: ${job.input} · K=${job.k ?? '—'}`));
-    if (job.outputs) {
-      $('job-paths').append(node('div', '', `Hadoop output: ${job.outputs.hadoop}`), node('div', '', `Spark output: ${job.outputs.spark}`));
-    } else {
-      $('job-paths').append(node('div', '', `Output: ${job.output}`));
-    }
+  } else if (job.kind === 'topk-hadoop') {
+    $('job-paths').append(node('div', '', `Input: ${job.input} · K=${job.k ?? '—'}`), node('div', '', `Output: ${job.output}`));
   }
   const log = $('job-log');
   const follow = renderedId !== job.id || log.scrollHeight - log.scrollTop - log.clientHeight < 60;
@@ -64,18 +59,10 @@ function render() {
   if (follow) log.scrollTop = log.scrollHeight;
   renderedId = job.id;
   $('job-result').replaceChildren();
-  const topk = ['topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind);
-  if (topk && job.status === 'succeeded' && (job.rows || job.comparison)) {
-    if (job.kind === 'topk-compare' && job.comparison) {
-      $('job-result').append(node('p', 'topk-verdict ' + (job.comparison.match ? 'match' : 'mismatch'),
-        job.comparison.match ? 'Both engines agree.' : 'Engines disagree — compare both sides.'));
-      for (const [title, rows] of [['Hadoop MapReduce', job.comparison.hadoop], ['Spark SQL', job.comparison.spark]]) {
-        $('job-result').append(node('div', 'detail-label', title), resultTable(rows));
-      }
-    } else {
-      $('job-result').append(resultTable(job.rows));
-    }
-    const inspect = node('a', 'button secondary', job.kind === 'topk-spark' ? 'Inspect Spark output dir' : 'Inspect result');
+  const topk = job.kind === 'topk-hadoop';
+  if (topk && job.status === 'succeeded' && job.rows) {
+    $('job-result').append(resultTable(job.rows));
+    const inspect = node('a', 'button secondary', 'Inspect result');
     inspect.href = '/topk?file=' + encodeURIComponent(job.result) + '#files';
     const download = node('a', 'text-button', '↓ Download result');
     download.href = downloadURL(job.result);

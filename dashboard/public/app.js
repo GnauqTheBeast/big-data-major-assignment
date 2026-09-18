@@ -12,9 +12,9 @@ function action(button, work) {
 function updateButtons() {
   const busy = state.jobs.some(job => job.status === 'running');
   const controls = new Map([...state.controls.map(item => [item.service, item.action]), ...state.pendingControls]);
-  const maintenance = state.jobs.some(job => job.status === 'running' && job.kind !== 'sort');
+  const maintenance = state.jobs.some(job => job.status === 'running' && !['sort', 'topk-hadoop'].includes(job.kind));
   const hdfsChanging = [...controls.keys()].some(name => name === 'namenode' || name.startsWith('datanode')) || maintenance;
-  const hdfsBusy = state.hdfsBusy || state.uploading || state.jobs.some(job => job.kind === 'sort' && job.status === 'running');
+  const hdfsBusy = state.hdfsBusy || state.uploading || state.jobs.some(job => ['sort', 'topk-hadoop'].includes(job.kind) && job.status === 'running');
   $('sort').disabled = busy || !state.selected || hdfsChanging;
   $('start-cluster').disabled = busy || controls.size > 0;
   $('file-upload').disabled = state.uploading || hdfsChanging;
@@ -30,7 +30,7 @@ function updateButtons() {
 
 function renderArchitecture() {
   const groups = $('service-groups'); groups.replaceChildren();
-  for (const [key, title] of [['hdfs', 'HDFS STORAGE'], ['yarn', 'YARN'], ['spark', 'SPARK']]) {
+  for (const [key, title] of [['hdfs', 'HDFS STORAGE'], ['yarn', 'YARN']]) {
     const group = node('div', 'service-group');
     group.append(node('div', 'group-title', title));
     state.services.filter(service => service.group === key).forEach((service, index) => {

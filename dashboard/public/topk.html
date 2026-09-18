@@ -19,23 +19,23 @@
       <a href="/jobs"><span>≡</span> Job activity</a>
       <a href="/datanodes"><span>▦</span> DataNodes</a>
     </nav>
-    <div class="sidebar-note"><span class="dot"></span> LOCAL ENVIRONMENT<p>HDFS · MapReduce · Spark</p><small>A window into your data cluster.</small></div>
+    <div class="sidebar-note"><span class="dot"></span> LOCAL ENVIRONMENT<p>HDFS · MapReduce</p><small>A window into your data cluster.</small></div>
   </aside>
   <main>
     <header class="topbar"><span>Workspace <span class="slash">/</span> <strong>Top-K items</strong></span><span class="local-label">localhost <span class="dot"></span></span></header>
     <div class="content">
       <nav class="page-tabs" aria-label="Page navigation"><a href="/topk" aria-current="page">Files</a><a href="/jobs">Job activity</a><a href="/datanodes">DataNodes</a></nav>
-      <div class="page-heading"><div><div class="eyebrow">HADOOP MAPREDUCE · SPARK SQL, SIDE BY SIDE</div><h1>The most popular items.</h1><p>Pick a keyword file, choose K and an engine, then compare Hadoop and Spark answers.</p></div><button id="refresh" class="button secondary">↻ Refresh</button></div>
+      <div class="page-heading"><div><div class="eyebrow">HADOOP MAPREDUCE</div><h1>The most popular items.</h1><p>Pick a keyword file and choose K to find the most frequent items.</p></div><button id="refresh" class="button secondary">↻ Refresh</button></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <section class="panel architecture" id="architecture" aria-labelledby="architecture-title">
-        <div class="section-heading"><div><h2 id="architecture-title">Cluster architecture <span id="cluster-count" class="badge">Checking…</span></h2><p>Live container status · Hadoop top-K uses LocalJobRunner, Spark uses standalone</p></div><button class="button secondary" id="start-cluster">Start cluster</button></div>
+        <div class="section-heading"><div><h2 id="architecture-title">Cluster architecture <span id="cluster-count" class="badge">Checking…</span></h2><p>Live container status · Hadoop Top-K uses LocalJobRunner</p></div><button class="button secondary" id="start-cluster">Start cluster</button></div>
         <div id="cluster-error" class="inline-message" hidden></div>
         <div class="architecture-layout">
-          <div class="entry-node"><div class="node-icon">★</div><strong>Top-K items</strong><span>Browser → Node.js</span><span class="mode-label">2 engines</span><small>Hadoop in NameNode · Spark on standalone</small></div>
+          <div class="entry-node"><div class="node-icon">★</div><strong>Top-K items</strong><span>Browser → Node.js</span><span class="mode-label">Hadoop MapReduce</span><small>Job runs in NameNode container</small></div>
           <div class="flow-arrow" aria-hidden="true">→</div>
           <div id="service-groups" class="service-groups" aria-live="polite"></div>
         </div>
-        <div class="architecture-footer"><span><i class="legend green"></i> Running <i class="legend gray"></i> Stopped / unavailable <i class="legend outline"></i> Holds selected blocks</span><span>Spark jobs need spark-master + spark-worker running.</span></div>
+        <div class="architecture-footer"><span><i class="legend green"></i> Running <i class="legend gray"></i> Stopped / unavailable <i class="legend outline"></i> Holds selected blocks</span></div>
       </section>
 
       <div class="work-area" id="files">
@@ -59,13 +59,6 @@
               <div><strong>Top-K popular items</strong><p>Each non-empty line counts as one occurrence</p></div>
               <div class="topk-controls">
                 <label class="topk-field">K <input id="topk-k" type="number" min="1" max="1000" value="3" inputmode="numeric"></label>
-                <label class="topk-field">Engine
-                  <select id="topk-engine">
-                    <option value="topk-compare">Both · compare</option>
-                    <option value="topk-hadoop">Hadoop MapReduce</option>
-                    <option value="topk-spark">Spark SQL</option>
-                  </select>
-                </label>
                 <button id="run-topk" class="button primary">Run top-K →</button>
               </div>
             </div>

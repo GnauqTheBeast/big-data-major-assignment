@@ -19,3 +19,7 @@ dashboard/state/datanodes.json
 
 # Large generated integer-sort inputs
 integer-sort/input/random-numbers-*.txt
+
+# Large generated top-k inputs (keep locally, do not commit)
+top-k/input/keywords-*M.txt
+top-k/input/vocab-*.txt

@@ -20,7 +20,7 @@ function inputStages(job, lines, available) {
       title: 'Selected HDFS input', active: ['browser', 'namenode'],
       description: 'The walkthrough reads a bounded preview from the selected job’s real HDFS input. It summarizes the sample without displaying the raw file.',
       input: job.input, output: sampleLabel(lines, available),
-      detail: 'The preview is for explaining transformations only. Hadoop and Spark process the complete file.',
+      detail: 'The preview is for explaining transformations only. Hadoop processes the complete file.',
     },
     {
       title: 'Read HDFS blocks', active: ['namenode', 'storage'],
@@ -82,35 +82,8 @@ function topKStages(job, lines, available) {
   const counts = countItems(lines);
   const k = job.k || 1;
   const candidates = counts.slice(0, k);
-  const actual = job.comparison?.hadoop || job.rows;
+  const actual = job.rows;
   const base = inputStages(job, lines, available);
-  if (job.kind === 'topk-spark') return [
-    ...base,
-    {
-      title: 'Clean DataFrame', active: ['storage', 'map'],
-      description: 'Spark reads text rows, trims each item, removes empty rows, and keeps a single item column.',
-      input: sampleLabel(lines, available), output: available ? `${lines.filter(line => line.trim()).length} non-empty sampled rows` : 'Waiting for readable input',
-      detail: 'Counts shown later are derived from the selected input preview; Spark processes every partition.',
-    },
-    {
-      title: 'Group and count', active: ['map', 'shuffle'],
-      description: 'Spark groups equal item values across partitions and counts each group.',
-      input: `${lines.filter(line => line.trim()).length} sampled rows`, output: formatRows(counts),
-      detail: 'This is the group/count transformation applied to the preview sample.',
-    },
-    {
-      title: `Order and limit ${k}`, active: ['shuffle', 'reduce'],
-      description: 'Spark orders by count descending, breaks ties by item ascending, and limits the DataFrame to K rows.',
-      input: `${counts.length} sampled groups`, output: formatRows(candidates),
-      detail: 'Sample candidates demonstrate the operation; they may differ from whole-file winners.',
-    },
-    {
-      title: 'Write actual result', active: ['reduce', 'output', 'storage'],
-      description: 'Spark writes the selected job’s final Top-K rows as CSV part files in HDFS.',
-      input: outputState(job), output: actual?.length ? formatRows(actual) : outputState(job),
-      detail: actual?.length ? 'These are the selected job’s actual full-input results.' : `Job status: ${job.status}.`,
-    },
-  ];
   const stages = [
     ...base,
     {
@@ -138,22 +111,7 @@ function topKStages(job, lines, available) {
       detail: actual?.length ? 'These rows are the selected Hadoop job’s actual full-input result.' : `Job status: ${job.status}.`,
     },
   ];
-  if (job.kind === 'topk-compare') stages.push(
-    {
-      title: `Run Spark Top-${k}`, active: ['storage', 'map', 'shuffle', 'reduce'],
-      description: 'Spark independently cleans the same HDFS input, groups and counts items, then orders and limits the DataFrame to K rows.',
-      input: sampleLabel(lines, available), output: job.comparison?.spark?.length ? formatRows(job.comparison.spark) : formatRows(candidates),
-      detail: job.comparison?.spark?.length ? 'These rows are Spark’s actual full-input result.' : 'The displayed candidates come from the bounded input preview while the job is incomplete.',
-    },
-    {
-      title: 'Compare engines', active: ['reduce', 'output', 'storage'],
-      description: 'The dashboard compares Hadoop and Spark rows in deterministic order after both jobs finish.',
-      input: job.comparison ? `Hadoop\n${formatRows(job.comparison.hadoop)}\n\nSpark\n${formatRows(job.comparison.spark)}` : outputState(job),
-      output: job.comparison ? (job.comparison.match ? 'Results match' : 'Results differ') : outputState(job),
-      detail: job.comparison ? 'Both sides shown here are actual full-input outputs.' : `Job status: ${job.status}.`,
-    },
-  );
-  else stages.push({
+  stages.push({
     title: 'Write actual result', active: ['reduce', 'output', 'storage'],
     description: 'Hadoop writes the final rows to part-r-00000 in the selected job’s output directory.',
     input: actual?.length ? formatRows(actual) : outputState(job), output: job.result || outputState(job),
@@ -343,12 +301,12 @@ export function createFlow(root) {
   }
   return {
     async setJob(job) {
-      const nextSignature = job ? `${job.id}:${job.status}:${JSON.stringify(job.rows)}:${JSON.stringify(job.comparison)}` : 'none';
+      const nextSignature = job ? `${job.id}:${job.status}:${JSON.stringify(job.rows)}` : 'none';
       if (nextSignature === signature) return;
       signature = nextSignature;
       const version = ++requestVersion;
       stop(); step = 0;
-      if (!job || !['sort', 'topk-hadoop', 'topk-spark', 'topk-compare'].includes(job.kind)) {
+      if (!job || !['sort', 'topk-hadoop'].includes(job.kind)) {
         stages = idleStages;
         context.textContent = job ? `The selected ${job.kind} operation has no record-processing walkthrough.` : 'Select a job to demonstrate its real data flow.';
         render(); return;
@@ -366,7 +324,7 @@ export function createFlow(root) {
       stages = job.kind === 'sort' ? sortStages(job, lines, resultText, available) : topKStages(job, lines, available);
       context.textContent = job.kind === 'sort'
         ? `Selected integer-sort job · ${job.status} · ${sampleLabel(lines, available)} for intermediate stages.`
-        : `Selected ${job.kind === 'topk-spark' ? 'Spark' : job.kind === 'topk-compare' ? 'Hadoop/Spark comparison' : 'Hadoop'} Top-K job · ${job.status} · K=${job.k ?? '—'} · ${sampleLabel(lines, available)} for intermediate stages.`;
+        : `Selected Hadoop Top-K job · ${job.status} · K=${job.k ?? '—'} · ${sampleLabel(lines, available)} for intermediate stages.`;
       render();
     },
   };

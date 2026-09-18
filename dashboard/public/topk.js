@@ -1,7 +1,6 @@
 import { $, node, bytes, basename, query, downloadURL, jobURL, api, notify } from './common.js';
 const state = { directory: '/', files: [], selected: null, blocks: [], services: [], jobs: [], jobId: null, selectionVersion: 0, directoryVersion: 0, uploading: false, controls: [], pendingControls: new Map(), hdfsBusy: false };
 const parent = path => path.slice(0, path.lastIndexOf('/')) || '/';
-const TOPK_KINDS = new Set(['topk-hadoop', 'topk-spark', 'topk-compare']);
 
 function action(button, work) {
   button.addEventListener('click', async () => {
@@ -13,9 +12,9 @@ function action(button, work) {
 function updateButtons() {
   const busy = state.jobs.some(job => job.status === 'running');
   const controls = new Map([...state.controls.map(item => [item.service, item.action]), ...state.pendingControls]);
-  const maintenance = state.jobs.some(job => job.status === 'running' && ![...TOPK_KINDS, 'sort'].includes(job.kind));
+  const maintenance = state.jobs.some(job => job.status === 'running' && !['topk-hadoop', 'sort'].includes(job.kind));
   const hdfsChanging = [...controls.keys()].some(name => name === 'namenode' || name.startsWith('datanode')) || maintenance;
-  const hdfsBusy = state.hdfsBusy || state.uploading || state.jobs.some(job => (job.kind === 'sort' || TOPK_KINDS.has(job.kind)) && job.status === 'running');
+  const hdfsBusy = state.hdfsBusy || state.uploading || state.jobs.some(job => (job.kind === 'sort' || job.kind === 'topk-hadoop') && job.status === 'running');
   $('run-topk').disabled = busy || !state.selected || hdfsChanging;
   $('start-cluster').disabled = busy || controls.size > 0;
   $('file-upload').disabled = state.uploading || hdfsChanging;
@@ -31,7 +30,7 @@ function updateButtons() {
 
 function renderArchitecture() {
   const groups = $('service-groups'); groups.replaceChildren();
-  for (const [key, title] of [['hdfs', 'HDFS STORAGE'], ['yarn', 'YARN'], ['spark', 'SPARK']]) {
+  for (const [key, title] of [['hdfs', 'HDFS STORAGE'], ['yarn', 'YARN']]) {
     const group = node('div', 'service-group');
     group.append(node('div', 'group-title', title));
     state.services.filter(service => service.group === key).forEach((service, index) => {
@@ -145,34 +144,18 @@ function renderTopkResult(job) {
   const panel = $('topk-result');
   const body = $('topk-result-body');
   body.replaceChildren();
-  if (!job || job.status !== 'succeeded' || (!job.rows && !job.comparison)) {
+  if (!job || job.status !== 'succeeded' || !job.rows) {
     panel.hidden = true;
     return;
   }
   panel.hidden = false;
-  $('topk-result-meta').textContent = `K=${job.k ?? '—'} · ${job.kind === 'topk-compare' ? 'both engines' : job.kind === 'topk-spark' ? 'Spark SQL' : 'Hadoop MapReduce'}`;
-  const single = rows => {
-    const table = node('table', 'topk-table');
-    const head = node('thead', '', node('tr', '', node('th', '', 'Rank'), node('th', '', 'Item'), node('th', '', 'Count')));
-    const tbody = node('tbody');
-    renderRows(tbody, rows);
-    table.append(head, tbody);
-    body.append(table);
-  };
-  if (job.kind === 'topk-compare' && job.comparison) {
-    const verdict = node('p', 'topk-verdict ' + (job.comparison.match ? 'match' : 'mismatch'),
-      job.comparison.match ? 'Both engines agree on the top-K answer.' : 'Engines disagree — compare both sides below.');
-    body.append(verdict);
-    for (const [title, rows] of [['Hadoop MapReduce', job.comparison.hadoop], ['Spark SQL', job.comparison.spark]]) {
-      body.append(node('div', 'detail-label', title));
-      single(rows);
-    }
-    const inspect = node('a', 'button secondary', 'Open job activity');
-    inspect.href = jobURL(job.id);
-    body.append(inspect);
-    return;
-  }
-  single(job.rows);
+  $('topk-result-meta').textContent = `K=${job.k ?? '—'} · Hadoop MapReduce`;
+  const table = node('table', 'topk-table');
+  const head = node('thead', '', node('tr', '', node('th', '', 'Rank'), node('th', '', 'Item'), node('th', '', 'Count')));
+  const tbody = node('tbody');
+  renderRows(tbody, job.rows);
+  table.append(head, tbody);
+  body.append(table);
   const inspect = node('a', 'button secondary', 'Open job activity');
   inspect.href = jobURL(job.id);
   body.append(inspect);
@@ -197,7 +180,7 @@ async function latestTopkForFile(inputPath, version) {
   try {
     const data = await api('/api/jobs');
     if (version !== state.selectionVersion) return;
-    const latest = data.jobs.find(job => job.status === 'succeeded' && TOPK_KINDS.has(job.kind) && job.input === inputPath);
+    const latest = data.jobs.find(job => job.status === 'succeeded' && job.kind === 'topk-hadoop' && job.input === inputPath);
     if (version !== state.selectionVersion) return;
     renderTopkResult(latest || null);
   } catch { /* preview already covers connectivity errors */ }
@@ -249,7 +232,7 @@ async function upload(file) {
       xhr.ontimeout = () => reject(new Error('Upload timed out. Check cluster health before retrying.'));
       xhr.send(file);
     });
-    notify('File uploaded to HDFS. Enter K, pick an engine, and run top-K.', true);
+    notify('File uploaded to HDFS. Enter K and run top-K.', true);
     await browse(parent(data.path));
     await selectFile({ path: data.path, name: basename(data.path), size: file.size, directory: false });
   } catch (error) { notify(error.message); }
@@ -269,7 +252,7 @@ async function refreshJobs() {
     for (const job of completed) {
       notify(job.status === 'succeeded' ? (job.kind === 'cluster' ? 'Containers started. HDFS may need a moment to become ready; click Refresh to reconnect.' : 'Operation complete. Open Job activity for the logs and results.') : 'Operation failed. Open Job activity for the error log.', job.status === 'succeeded');
       if (job.kind === 'cluster') { await refreshStatus(); await browse(state.directory); }
-      if (TOPK_KINDS.has(job.kind) && job.status === 'succeeded' && job.input === state.selected?.path) renderTopkResult(job);
+      if (job.kind === 'topk-hadoop' && job.status === 'succeeded' && job.input === state.selected?.path) renderTopkResult(job);
     }
   } catch (error) { notify('Cannot refresh jobs: ' + error.message); }
   finally { jobsRefreshing = false; }
@@ -288,7 +271,7 @@ action($('run-topk'), async () => {
   const raw = $('topk-k').value;
   const k = raw === '' ? NaN : Number(raw);
   if (!Number.isInteger(k) || k < 1 || k > 1000) return notify('K must be an integer between 1 and 1000.');
-  const job = await api('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: state.selected.path, kind: $('topk-engine').value, k }) });
+  const job = await api('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: state.selected.path, kind: 'topk-hadoop', k }) });
   location.href = jobURL(job.id);
 });
 action($('start-cluster'), async () => {
