@@ -4,6 +4,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node dashboard/server.js"
+    "start": "node dashboard/server.js",
+    "test": "node --test"
   }
 }

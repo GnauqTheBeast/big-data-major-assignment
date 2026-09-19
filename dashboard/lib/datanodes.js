@@ -107,7 +107,7 @@ export class DataNodes {
     await this.save(settings);
     await this.hadoop.startCluster(log);
     const extras = settings.enabled.filter(name => name !== 'datanode');
-    if (extras.length) await this.hadoop.docker(['compose', 'up', '-d', '--no-deps', ...extras], { timeout: 120000, onData: log });
+    if (extras.length) await this.hadoop.docker(['compose', 'up', '-d', '--no-deps', '--force-recreate', ...extras], { timeout: 120000, onData: log });
   }
 
   async add(service, log) {
@@ -121,7 +121,7 @@ export class DataNodes {
     await this.save(settings);
     await this.hadoop.hdfs(['dfsadmin', '-refreshNodes'], { onData: log });
     log(`Starting ${service} with its own persistent volume…\n`);
-    await this.hadoop.docker(['compose', 'up', '-d', '--no-deps', service], { timeout: 120000, onData: log });
+    await this.hadoop.docker(['compose', 'up', '-d', '--no-deps', '--force-recreate', service], { timeout: 120000, onData: log });
     await this.waitFor(async () => {
       const data = await this.status();
       const node = data.nodes.find(item => item.name === service);
